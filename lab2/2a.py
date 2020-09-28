@@ -1,6 +1,7 @@
 import numpy as np
 import simpy
 import matplotlib.pyplot as plt
+import math
 
 T_guard = 60
 P_DELAY = 0.5
@@ -24,14 +25,34 @@ def is_delayed():
     return np.random.choice([True, False], p=[P_DELAY, 1 - P_DELAY])
 
 def get_delayed_time():
-    return np.random.gamma(3, 3)
+    return np.random.gamma(3, 0)
 
+def take_means(planes):
+    prev = 0
+    means = []
+    IAs = []
+    for plane in planes:
+        hour = math.floor(plane.scheduled)
+        if hour == prev:
+            IAs.append(plane.inter_arrival)
+        else:
+            means.append(sum(IAs)/len(IAs))
+            IAs = [plane.inter_arrival]
+            prev = hour
+    return means
+
+
+
+class Plane:
+    def __init__(self, scheduled, inter_arrival):
+        self.scheduled = scheduled
+        self.inter_arrival = inter_arrival
+        
 
 class PlaneGenerator:
     def __init__(self, env):
         self.env = env
-        self.IAs = []
-        self.times = []
+        self.planes = []
         env.process(self.generate())
 
     def generate(self):
@@ -42,8 +63,7 @@ class PlaneGenerator:
 
             if T is not None:
                 inter_arrival = np.maximum(T_guard, T)
-                self.IAs.append(inter_arrival + delay)
-                self.times.append(t/3600)
+                self.planes.append(Plane(t/3600, inter_arrival + delay))
                 
                 if is_delayed():
                     delay = get_delayed_time()
@@ -54,8 +74,7 @@ class PlaneGenerator:
 
                 yield self.env.timeout(inter_arrival)
             else:
-                self.IAs.append(0)
-                self.times.append(t/3600)
+                self.planes.append(Plane(t/3600, 0))
                 yield self.env.timeout(1)
 
 env = simpy.Environment()
@@ -64,7 +83,9 @@ gen = PlaneGenerator(env)
 
 env.run(until=SIM_TIME)
 
-plt.plot(gen.times, gen.IAs)
+means = take_means(gen.planes)
+
+plt.plot([i for i in range(len(means))], means)
 
 plt.show()
 
