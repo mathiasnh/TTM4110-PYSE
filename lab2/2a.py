@@ -6,6 +6,7 @@ import math
 T_guard = 60
 P_DELAY = 0.5
 SIM_TIME = 86400
+MU_DELAY = 500
 
 def get_scheduled_time(time):
     if time < 18000:
@@ -25,7 +26,7 @@ def is_delayed():
     return np.random.choice([True, False], p=[P_DELAY, 1 - P_DELAY])
 
 def get_delayed_time():
-    return np.random.gamma(3, 0)
+    return np.random.gamma(3, MU_DELAY)
 
 def take_means(planes):
     prev = 0
@@ -39,6 +40,9 @@ def take_means(planes):
             means.append(sum(IAs)/len(IAs))
             IAs = [plane.inter_arrival]
             prev = hour
+
+    means.append(sum(IAs)/len(IAs))
+
     return means
 
 class Plane:
@@ -82,10 +86,12 @@ env.run(until=SIM_TIME)
 
 means = take_means(gen.planes)
 
+
 plt.plot([i for i in range(len(means))], means)
 plt.xlabel('Hour')
 plt.ylabel('Inter-arrival time')
-plt.title('Mean inter-arrival time per hour (µ_delay=0)', fontsize=16)
+plt.title('Mean inter-arrival time per hour (µ_delay=' + str(MU_DELAY) + ")", fontsize=16)
+plt.xlim(5,23)
 
 plt.show()
 
