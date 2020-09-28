@@ -42,13 +42,19 @@ def take_means(planes):
     return means
 
 class Plane:
-    def __init__(self, scheduled, inter_arrival):
+    def __init__(self, env, scheduled, inter_arrival, runways):
         self.scheduled = scheduled
         self.inter_arrival = inter_arrival
+        #env.process(self.land())
+
+    def land(self):
+        pass
+
 
 class PlaneGenerator:
-    def __init__(self, env):
+    def __init__(self, env, runways):
         self.env = env
+        self.runways = runways
         self.planes = []
         env.process(self.generate())
 
@@ -60,7 +66,7 @@ class PlaneGenerator:
 
             if T is not None:
                 inter_arrival = np.maximum(T_guard, T)
-                self.planes.append(Plane(t/3600, inter_arrival + delay))
+                self.planes.append(Plane(env, t/3600, inter_arrival + delay, runways))
                 
                 if is_delayed():
                     delay = get_delayed_time()
@@ -71,12 +77,14 @@ class PlaneGenerator:
 
                 yield self.env.timeout(inter_arrival)
             else:
-                self.planes.append(Plane(t/3600, 0))
+                #self.planes.append(Plane(t/3600, 0,))
                 yield self.env.timeout(1)
 
 env = simpy.Environment()
 
-gen = PlaneGenerator(env)
+runways = [simpy.PriorityResource(env), simpy.PriorityResource(env)]
+gen = PlaneGenerator(env, runways)
+
 
 env.run(until=SIM_TIME)
 
@@ -85,7 +93,7 @@ means = take_means(gen.planes)
 plt.plot([i for i in range(len(means))], means)
 plt.xlabel('Hour')
 plt.ylabel('Inter-arrival time')
-plt.title('Mean inter-arrival time per hour (µ_delay=0)', fontsize=16)
+plt.title('Mean inter-arrival time per hour (µ_delay=500)', fontsize=16)
 
 plt.show()
 
