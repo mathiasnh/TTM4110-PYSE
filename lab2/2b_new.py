@@ -8,7 +8,7 @@ T_LANDING = 60
 T_TAKEOFF = 60
 P_DELAY = 0.5
 SIM_TIME = 86400
-MU_DELAY = 3600*0
+MU_DELAY = 3600*1
 MU_TURNAROUND = 45
 FIRST_PLANE = 5 #AM
 
@@ -41,8 +41,7 @@ def take_means(planes, what):
     thing = []
     for plane in planes:
         hour = math.floor(plane.arrival_time/3600)
-        print(hour)
-        if hour < 26:
+        if hour < 24:
             if hour == prev:
                 if what == "landing":
                     thing.append(plane.landing_q_time)
