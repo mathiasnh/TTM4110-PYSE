@@ -6,8 +6,8 @@ import math
 T_guard = 60
 P_DELAY = 0.5
 SIM_TIME = 86400
-MU_DELAY = 3600*1
 FIRST_PLANE = 5 #AM
+MU_DELAY = 0
 
 def get_scheduled_time(time):
     if time < 18000:
@@ -27,7 +27,7 @@ def is_delayed():
     return np.random.choice([True, False], p=[P_DELAY, 1 - P_DELAY])
 
 def get_delayed_time():
-    return np.random.gamma(3, MU_DELAY)
+    return np.random.gamma(shape = 3, scale = MU_DELAY)
 
 class Plane:
     def __init__(self, arrival_time):
@@ -58,48 +58,61 @@ class PlaneGenerator:
             else:
                 yield self.env.timeout(1)
 
-env = simpy.Environment()
+def find_means_per_clock_hour(average_hours, inter_arrivals):
+    prev = FIRST_PLANE
+    means = []
+    IAs = []
+    for inter_arrival, average_hour in zip(inter_arrivals, average_hours):
+        hour = math.floor(average_hour)
 
-gen = PlaneGenerator(env)
+        if hour == prev:
+            IAs.append(inter_arrival[0])
+        else:
+            means.append(sum(IAs)/len(IAs))
+            IAs = [inter_arrival[0]]
+            prev = hour
 
-env.run(until=SIM_TIME)
+    means.append(sum(IAs)/len(IAs))
 
-means = []
+    return means
 
-prev_hour = FIRST_PLANE
-inter_arrival = []
+def simulate():
+    env = simpy.Environment()
 
-gen.planes.sort(key=lambda x:x.arrival_time)
+    gen = PlaneGenerator(env)
 
-"""
-for i in range(len(gen.planes) - 1):
-    hour = math.floor((gen.planes[i+1].arrival_time+gen.planes[i].arrival_time)/2/3600)
+    env.run(until=SIM_TIME)
 
-    if hour == prev_hour:
-        inter_arrival.append(gen.planes[i+1].arrival_time - gen.planes[i].arrival_time)
-    else:
-        means.append(sum(inter_arrival)/len(inter_arrival))
-        inter_arrival = [gen.planes[i+1].arrival_time - gen.planes[i].arrival_time]
-        prev_hour = hour
+    inter_arrival = []
 
-means.append(sum(inter_arrival)/len(inter_arrival))
+    gen.planes.sort(key=lambda x:x.arrival_time)
 
-plt.plot([i for i in range(FIRST_PLANE,len(means)+FIRST_PLANE)], means)
-"""
+    time = []
 
-time = []
+    for i in range(len(gen.planes) - 1):
+        calc_time = (gen.planes[i+1].arrival_time+gen.planes[i].arrival_time)/2/3600
 
-for i in range(len(gen.planes) - 1):
-    calc_time = (gen.planes[i+1].arrival_time+gen.planes[i].arrival_time)/2/3600
+        if calc_time < 24:
+            time.append((gen.planes[i+1].arrival_time+gen.planes[i].arrival_time)/2/3600)
+            inter_arrival.append([gen.planes[i+1].arrival_time - gen.planes[i].arrival_time])
 
-    if calc_time < 24:
-        time.append((gen.planes[i+1].arrival_time+gen.planes[i].arrival_time)/2/3600)
-        inter_arrival.append([gen.planes[i+1].arrival_time - gen.planes[i].arrival_time])
+    return find_means_per_clock_hour(time, inter_arrival)
 
-plt.plot(time, inter_arrival)
+
+MU_DELAYS = [0, 5400]
+
+
+for delay in MU_DELAYS:
+    MU_DELAY = delay
+    means = simulate()
+    plt.plot([i for i in range(FIRST_PLANE, len(means)+FIRST_PLANE)], means)
+
 
 plt.xlabel('Time of day [Hours]')
 plt.ylabel('Inter-arrival time [seconds]')
-plt.title('Mean inter-arrival time per hour (µ_delay=' + str(MU_DELAY) + ")", fontsize=16)
-plt.ylim(0,1000)
+
+legends = ["µ_delay = " + str(delay/3600) + " hour(s)" for delay in MU_DELAYS]
+
+plt.legend(legends)
+plt.title('Mean inter-arrival time per hour', fontsize=16)
 plt.show()
