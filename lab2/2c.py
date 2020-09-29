@@ -6,10 +6,17 @@ import math
 T_guard = 60
 T_LANDING = 60
 T_TAKEOFF = 60
+T_PLOW = 3600*2
+T_DEICE = 60*10
 P_DELAY = 0.5
 SIM_TIME = 86400
 MU_DELAY = 60
 MU_TURNAROUND = 45
+BAD_WEATHER = 3600*1
+GOOD_WEATHER = 3600*2
+SNOW_TIME = 3600*0.75
+NUM_PLOW_TRUCKS = 1
+NUM_DEICING_TRUCKS = 1
 FIRST_PLANE = 5 #AM
 
 def get_scheduled_time(time):
@@ -35,10 +42,14 @@ def get_delayed_time():
 def get_turnaround_time():
     return np.random.gamma(7, MU_TURNAROUND)
 
-def request_runway(priority, hold_time):
-    with runways.request(priority=priority) as req:
-        yield req
-        yield self.env.timeout(hold_time)
+def get_snow_time():
+    return np.random.exponential(BAD_WEATHER)
+
+def get_clear_time():
+    return np.random.exponential(GOOD_WEATHER)
+
+def get_runway_fill_time():
+    return np.random.exponential(SNOW_TIME)
 
 def take_means(planes, what):
     prev = 5
@@ -64,12 +75,13 @@ def take_means(planes, what):
     return means
 
 class Plane:
-    def __init__(self, env, scheduled, delay, runways):
+    def __init__(self, env, scheduled, delay, runways, deicing_trucks):
         self.env = env
         self.scheduled = scheduled
         self.arrival_time = scheduled + delay
         self.delay = delay
         self.runways = runways
+        self.deicing_trucks = deicing_trucks
         self.landing_q_time = 0
         self.takeoff_q_time = 0
         env.process(self.land())
@@ -79,7 +91,6 @@ class Plane:
 
         landing_start = self.env.now
 
-        # Request runway for landing (high priority)
         with runways.request(priority=1) as req:
             yield req
             yield self.env.timeout(T_LANDING)
@@ -88,9 +99,12 @@ class Plane:
         
         yield self.env.timeout(get_turnaround_time())
 
+        with deicing_trucks.request(priority=1) as req:
+            yield req
+            yield self.env.timeout(T_DEICE)
+        
         takeoff_start = self.env.now
 
-        # Request runway for take-off (low priority)
         with runways.request(priority=2) as req:
             yield req
             yield self.env.timeout(T_TAKEOFF)
@@ -101,9 +115,10 @@ class Plane:
         self.takeoff_q_time = (takeoff_end - takeoff_start) - T_TAKEOFF
 
 class PlaneGenerator:
-    def __init__(self, env, runways):
+    def __init__(self, env, runways, deicing_trucks):
         self.env = env
         self.runways = runways
+        self.deicing_trucks = deicing_trucks
         self.planes = []
         env.process(self.generate())
 
@@ -120,18 +135,48 @@ class PlaneGenerator:
                 else:
                     delay = 0
 
-                self.planes.append(Plane(self.env, t, delay, self.runways))
+                self.planes.append(Plane(self.env, t, delay, self.runways, self.deicing_trucks))
                 hold_time = np.maximum(T_guard, T)
                 yield self.env.timeout(hold_time)
             else:
                 yield self.env.timeout(1)
 
+class PlowTruck:
+    def __init__(self, env, runways):
+        self.env = env
+        self.runways = runways
+        env.process(self.plow())
+
+    def plow(self):
+        with runways.request(priority=0) as req:
+            yield req
+            yield self.env.timeout(T_PLOW)
+
+class PlowTruckGenerator:
+    def __init__(self, env, runways):
+        self.env = env
+        self.runways = runways
+        env.process(self.generate())
+    
+    def generate(self):
+        while True:
+            # Snows for a certain amount of time
+            yield self.env.timeout(get_snow_time())
+
+            # Send out N number of plow trucks and let them do they thing
+            for i in range(NUM_PLOW_TRUCKS):
+                PlowTruck(env, runways)
+            
+            # Skies are clear for a certain amount of time
+            yield self.env.timeout(get_clear_time())
 
 if __name__ == "__main__":
     env = simpy.Environment()
 
     runways = simpy.PriorityResource(env, capacity=2)
-    gen = PlaneGenerator(env, runways)
+    deicing_trucks = simpy.PriorityResource(env, capacity=NUM_DEICING_TRUCKS)
+    plane_gen = PlaneGenerator(env, runways, deicing_trucks)
+    plow_gen = PlowTruckGenerator(env, runways)
 
     env.run(until=SIM_TIME)
 
@@ -140,19 +185,19 @@ if __name__ == "__main__":
     prev_hour = FIRST_PLANE
     inter_arrival = []
 
-    gen.planes.sort(key=lambda x:x.arrival_time)
+    plane_gen.planes.sort(key=lambda x:x.arrival_time)
 
     time = []
 
-    for i in range(len(gen.planes) - 1):
-        calc_time = (gen.planes[i+1].arrival_time+gen.planes[i].arrival_time)/2/3600
+    for i in range(len(plane_gen.planes) - 1):
+        calc_time = (plane_gen.planes[i+1].arrival_time+plane_gen.planes[i].arrival_time)/2/3600
 
         if calc_time < 24:
-            time.append((gen.planes[i+1].arrival_time+gen.planes[i].arrival_time)/2/3600)
-            inter_arrival.append([gen.planes[i+1].arrival_time - gen.planes[i].arrival_time])
+            time.append((plane_gen.planes[i+1].arrival_time+plane_gen.planes[i].arrival_time)/2/3600)
+            inter_arrival.append([plane_gen.planes[i+1].arrival_time - plane_gen.planes[i].arrival_time])
 
-    landing_means = take_means(gen.planes, "landing")
-    takeoff_means = take_means(gen.planes, "takeoff")
+    landing_means = take_means(plane_gen.planes, "landing")
+    takeoff_means = take_means(plane_gen.planes, "takeoff")
 
     plt.plot([i for i in range(len(landing_means))], landing_means)
     plt.plot([i for i in range(len(takeoff_means))], takeoff_means)
