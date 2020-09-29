@@ -3,14 +3,15 @@ import simpy
 import matplotlib.pyplot as plt
 import math
 
-T_guard = 60
-T_LANDING = 60
-T_TAKEOFF = 60
 P_DELAY = 0.5
 SIM_TIME = 86400
 MU_DELAY = 60
-MU_TURNAROUND = 45
 FIRST_PLANE = 5 #AM
+
+T_guard = 60 # seconds
+T_LANDING = 60 # seconds
+T_TAKEOFF = 60 # seconds
+MU_TURNAROUND = 45*60 # seconds
 
 def get_scheduled_time(time):
     if time < 18000:
@@ -35,14 +36,9 @@ def get_delayed_time():
 def get_turnaround_time():
     return np.random.gamma(7, MU_TURNAROUND)
 
-def request_runway(priority, hold_time):
-    with runways.request(priority=priority) as req:
-        yield req
-        yield self.env.timeout(hold_time)
-
 def take_means(planes, what):
-    prev = 5
-    means = [0,0,0,0,0]
+    prev = FIRST_PLANE
+    means = [0]*FIRST_PLANE
     thing = []
     for plane in planes:
         hour = math.floor(plane.arrival_time/3600)
@@ -80,7 +76,7 @@ class Plane:
         landing_start = self.env.now
 
         # Request runway for landing (high priority)
-        with runways.request(priority=1) as req:
+        with self.runways.request(priority=1) as req:
             yield req
             yield self.env.timeout(T_LANDING)
 
@@ -91,7 +87,7 @@ class Plane:
         takeoff_start = self.env.now
 
         # Request runway for take-off (low priority)
-        with runways.request(priority=2) as req:
+        with self.runways.request(priority=2) as req:
             yield req
             yield self.env.timeout(T_TAKEOFF)
         
@@ -114,7 +110,6 @@ class PlaneGenerator:
             T = get_scheduled_time(t)
 
             if T is not None:
-                # Schedule plane
                 if is_delayed():
                     delay = get_delayed_time()
                 else:
@@ -127,7 +122,7 @@ class PlaneGenerator:
                 yield self.env.timeout(1)
 
 
-if __name__ == "__main__":
+def simulate():
     env = simpy.Environment()
 
     runways = simpy.PriorityResource(env, capacity=2)
@@ -135,30 +130,60 @@ if __name__ == "__main__":
 
     env.run(until=SIM_TIME)
 
-    means = []
-
-    prev_hour = FIRST_PLANE
-    inter_arrival = []
-
     gen.planes.sort(key=lambda x:x.arrival_time)
-
-    time = []
-
-    for i in range(len(gen.planes) - 1):
-        calc_time = (gen.planes[i+1].arrival_time+gen.planes[i].arrival_time)/2/3600
-
-        if calc_time < 24:
-            time.append((gen.planes[i+1].arrival_time+gen.planes[i].arrival_time)/2/3600)
-            inter_arrival.append([gen.planes[i+1].arrival_time - gen.planes[i].arrival_time])
 
     landing_means = take_means(gen.planes, "landing")
     takeoff_means = take_means(gen.planes, "takeoff")
 
-    plt.plot([i for i in range(len(landing_means))], landing_means)
-    plt.plot([i for i in range(len(takeoff_means))], takeoff_means)
-    plt.legend(['Landing', 'take-off'])
-    plt.xlabel('Hour of day')
-    plt.ylabel('Qeueu time (seconds)')
-    plt.title('Mean landing and take-off times', fontsize=16)
+    return landing_means, takeoff_means
 
-    plt.show()
+legends = []
+
+"""
+MU_DELAYS = [0, 3600*1.5]
+i = 0
+for delay in MU_DELAYS:
+    MU_DELAY = delay
+    landing_means, takeoff_means = simulate()
+    if len(MU_DELAYS) == 1:
+        plt.plot([i for i in range(len(landing_means))], landing_means)
+        plt.plot([i for i in range(len(takeoff_means))], takeoff_means)
+    elif i == 0:
+        plt.plot([i for i in range(len(landing_means))], landing_means, "m")
+        plt.plot([i for i in range(len(takeoff_means))], takeoff_means, "m--")
+    else:
+        plt.plot([i for i in range(len(landing_means))], landing_means, "g")
+        plt.plot([i for i in range(len(takeoff_means))], takeoff_means, "g--")
+        
+    legends.append("Landing, µ = " + str(delay/3600) + " hour(s)")
+    legends.append("Take-off, µ = " + str(delay/3600) + " hour(s)")
+    
+    i+=1
+"""
+P_DELAYS = [0.1, 0.9]
+i = 0
+for delay in P_DELAYS:
+    P_DELAY = delay
+    landing_means, takeoff_means = simulate()
+    if len(P_DELAYS) == 1:
+        plt.plot([i for i in range(len(landing_means))], landing_means)
+        plt.plot([i for i in range(len(takeoff_means))], takeoff_means)
+    elif i == 0:
+        plt.plot([i for i in range(len(landing_means))], landing_means, "m")
+        plt.plot([i for i in range(len(takeoff_means))], takeoff_means, "m--")
+    else:
+        plt.plot([i for i in range(len(landing_means))], landing_means, "g")
+        plt.plot([i for i in range(len(takeoff_means))], takeoff_means, "g--")
+        
+    legends.append("Landing, P_delay = " + str(delay))
+    legends.append("Take-off, P_delay = " + str(delay))
+    
+    i+=1
+
+plt.legend(['Landing', 'Take-off'])
+plt.xlabel('Hour of day')
+plt.ylabel('Queue time (seconds)')
+plt.legend(legends)
+plt.title('Mean landing and take-off times', fontsize=16)
+
+plt.show()
