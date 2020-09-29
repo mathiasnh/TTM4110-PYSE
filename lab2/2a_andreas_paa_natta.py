@@ -6,7 +6,7 @@ import math
 T_guard = 60
 P_DELAY = 0.5
 SIM_TIME = 86400
-MU_DELAY = 3600*5
+MU_DELAY = 3600*1
 FIRST_PLANE = 5 #AM
 
 def get_scheduled_time(time):
@@ -46,13 +46,13 @@ class PlaneGenerator:
             T = get_scheduled_time(t)
 
             if T is not None:
-                self.planes.append(Plane(t + delay))
                 # Schedule plane
                 if is_delayed():
                     delay = get_delayed_time()
                 else:
                     delay = 0
 
+                self.planes.append(Plane(t + delay))
                 hold_time = np.maximum(T_guard, T)
                 yield self.env.timeout(hold_time)
             else:
@@ -90,14 +90,16 @@ plt.plot([i for i in range(FIRST_PLANE,len(means)+FIRST_PLANE)], means)
 time = []
 
 for i in range(len(gen.planes) - 1):
-    inter_arrival.append([gen.planes[i+1].arrival_time - gen.planes[i].arrival_time])
-    time.append((gen.planes[i+1].arrival_time+gen.planes[i].arrival_time)/2/3600)
+    calc_time = (gen.planes[i+1].arrival_time+gen.planes[i].arrival_time)/2/3600
+
+    if calc_time < 24:
+        time.append((gen.planes[i+1].arrival_time+gen.planes[i].arrival_time)/2/3600)
+        inter_arrival.append([gen.planes[i+1].arrival_time - gen.planes[i].arrival_time])
 
 plt.plot(time, inter_arrival)
 
 plt.xlabel('Time of day [Hours]')
 plt.ylabel('Inter-arrival time [seconds]')
 plt.title('Mean inter-arrival time per hour (µ_delay=' + str(MU_DELAY) + ")", fontsize=16)
-plt.xlim(5,24)
 plt.ylim(0,1000)
 plt.show()
