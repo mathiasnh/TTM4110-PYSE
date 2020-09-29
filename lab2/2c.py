@@ -3,20 +3,21 @@ import simpy
 import matplotlib.pyplot as plt
 import math
 
+P_DELAY = 0.5
+SIM_TIME = 86400
+MU_DELAY = 3600*0
+MU_TURNAROUND = 60*45
+BAD_WEATHER = 3600*1
+GOOD_WEATHER = 3600*2
+SNOW_TIME = 60*45
+NUM_RUNWAYS = 2
+NUM_PLOW_TRUCKS = 1
+NUM_DEICING_TRUCKS = 10
 T_guard = 60
 T_LANDING = 60
 T_TAKEOFF = 60
-T_PLOW = 3600*2
-T_DEICE = 60*10
-P_DELAY = 0.5
-SIM_TIME = 86400
-MU_DELAY = 60
-MU_TURNAROUND = 45
-BAD_WEATHER = 3600*1
-GOOD_WEATHER = 3600*2
-SNOW_TIME = 3600*0.75
-NUM_PLOW_TRUCKS = 1
-NUM_DEICING_TRUCKS = 1
+T_PLOW = 60*10*NUM_RUNWAYS/NUM_PLOW_TRUCKS
+T_DEICE = 60*10*1
 FIRST_PLANE = 5 #AM
 
 def get_scheduled_time(time):
@@ -63,12 +64,16 @@ def take_means(planes, what):
                     thing.append(plane.landing_q_time)
                 elif what == "takeoff":
                     thing.append(plane.takeoff_q_time)
+                elif what == "deicing":
+                    thing.append(plane.deicing_q_time)
             else:
                 means.append(sum(thing)/len(thing))
                 if what == "landing":
                     thing = [plane.landing_q_time]
                 elif what == "takeoff":
                     thing = [plane.takeoff_q_time]
+                elif what == "deicing":
+                    thing.append(plane.deicing_q_time)
                 
                 prev = hour
     means.append(sum(thing)/len(thing))
@@ -84,6 +89,7 @@ class Plane:
         self.deicing_trucks = deicing_trucks
         self.landing_q_time = 0
         self.takeoff_q_time = 0
+        self.deicing_q_time = 0
         env.process(self.land())
 
     def land(self):
@@ -99,9 +105,13 @@ class Plane:
         
         yield self.env.timeout(get_turnaround_time())
 
+        deicing_start = self.env.now
+
         with deicing_trucks.request(priority=1) as req:
             yield req
             yield self.env.timeout(T_DEICE)
+
+        deicing_end = self.env.now
         
         takeoff_start = self.env.now
 
@@ -113,6 +123,7 @@ class Plane:
 
         self.landing_q_time = (landing_end - landing_start) - T_LANDING
         self.takeoff_q_time = (takeoff_end - takeoff_start) - T_TAKEOFF
+        self.deicing_q_time = (deicing_end - deicing_start) - T_DEICE
 
 class PlaneGenerator:
     def __init__(self, env, runways, deicing_trucks):
@@ -142,9 +153,11 @@ class PlaneGenerator:
                 yield self.env.timeout(1)
 
 class PlowTruck:
-    def __init__(self, env, runways):
+    def __init__(self, env, runways, deployed):
         self.env = env
         self.runways = runways
+        self.deployed = deployed/3600
+
         env.process(self.plow())
 
     def plow(self):
@@ -156,6 +169,7 @@ class PlowTruckGenerator:
     def __init__(self, env, runways):
         self.env = env
         self.runways = runways
+        self.trucks = []
         env.process(self.generate())
     
     def generate(self):
@@ -163,17 +177,24 @@ class PlowTruckGenerator:
             # Snows for a certain amount of time
             yield self.env.timeout(get_snow_time())
 
-            # Send out N number of plow trucks and let them do they thing
-            for i in range(NUM_PLOW_TRUCKS):
-                PlowTruck(env, runways)
-            
+            """
+                In order to close all runways after snowing, we schedule NUM_RUNWAYS amount of trucks;
+                however, only NUM_PLOW_TRUCKS trucks are allowed to operate at a time in order to uphold 
+                the contraints. This is achieved by increase or decrease the plowing time depending on the 
+                runway-to-plowtruck ratio (NUM_RUNWAYS/NUM_PLOW_TRUCKS). E.g. if we have one plow truck and three runways, we have to 'deploy'
+                three plow trucks to stop all plane traffic on the runways, but we have to increase the plowing
+                time my a magnitude of 3 to simulate only one plow truck operating.  
+            """
+            for i in range(NUM_RUNWAYS):
+                self.trucks.append(PlowTruck(env, runways, self.env.now))
+
             # Skies are clear for a certain amount of time
             yield self.env.timeout(get_clear_time())
 
 if __name__ == "__main__":
     env = simpy.Environment()
 
-    runways = simpy.PriorityResource(env, capacity=2)
+    runways = simpy.PriorityResource(env, capacity=NUM_RUNWAYS)
     deicing_trucks = simpy.PriorityResource(env, capacity=NUM_DEICING_TRUCKS)
     plane_gen = PlaneGenerator(env, runways, deicing_trucks)
     plow_gen = PlowTruckGenerator(env, runways)
@@ -198,10 +219,18 @@ if __name__ == "__main__":
 
     landing_means = take_means(plane_gen.planes, "landing")
     takeoff_means = take_means(plane_gen.planes, "takeoff")
+    deicing_means = take_means(plane_gen.planes, "deicing")
 
-    plt.plot([i for i in range(len(landing_means))], landing_means)
-    plt.plot([i for i in range(len(takeoff_means))], takeoff_means)
-    plt.legend(['Landing', 'take-off'])
+    print("{} plow trucks deployed".format(len(plow_gen.trucks)))
+    i = 0
+    for truck in plow_gen.trucks:
+        print("Truck {} deployed at hour {}".format(i, truck.deployed))
+        i += 1
+
+    plt.plot([i for i in range(len(landing_means))], landing_means, "y")
+    plt.plot([i for i in range(len(takeoff_means))], takeoff_means, "r")
+    plt.plot([i for i in range(len(deicing_means))], deicing_means, "b--")
+    plt.legend(['Landing', 'take-off', "deicing"])
     plt.xlabel('Hour of day')
     plt.ylabel('Qeueu time (seconds)')
     plt.title('Mean landing and take-off times', fontsize=16)
