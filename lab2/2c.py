@@ -12,7 +12,7 @@ GOOD_WEATHER = 3600*2
 SNOW_TIME = 60*45
 NUM_RUNWAYS = 2
 NUM_PLOW_TRUCKS = 1
-NUM_DEICING_TRUCKS = 10
+NUM_DEICING_TRUCKS = 5
 T_guard = 60
 T_LANDING = 60
 T_TAKEOFF = 60
@@ -24,15 +24,15 @@ def get_scheduled_time(time):
     if time < 18000:
         return None
     elif time < 28800:
-        return np.random.exponential(120)
+        return np.random.exponential(3600/120)
     elif time < 39600:
-        return np.random.exponential(30)
+        return np.random.exponential(3600/30)
     elif time < 54000:
-        return np.random.exponential(150)
+        return np.random.exponential(3600/150)
     elif time < 72000:
-        return np.random.exponential(30)
+        return np.random.exponential(3600/30)
     elif time <= 86400:
-        return np.random.exponential(120)
+        return np.random.exponential(3600/120)
 
 def is_delayed():
     return np.random.choice([True, False], p=[P_DELAY, 1 - P_DELAY])
@@ -191,13 +191,52 @@ class PlowTruckGenerator:
             # Skies are clear for a certain amount of time
             yield self.env.timeout(get_clear_time())
 
+class Weather:
+    def __init__(self, env, runways):
+        self.env = env
+        self.runways = runways
+        self.trucks = []
+        env.process(self.run())
+
+    def run(self):
+        while True: 
+            fill = self.env.process(self.fill())
+            snow = self.env.process(self.snow(fill))
+            """
+                Snows for a certain amount of time. 
+                Runways may be filled multiple times per snowing.
+            """
+            yield snow & fill
+
+            # Skies are clear for a certain amount of time
+            yield self.env.timeout(get_clear_time())
+
+    def fill(self):
+        while True:
+            try:
+                yield self.env.timeout(get_runway_fill_time())
+
+                for i in range(NUM_RUNWAYS):
+                    self.trucks.append(PlowTruck(env, runways, self.env.now))
+            except simpy.Interrupt:
+                pass
+
+
+    def snow(self, fill):
+        yield self.env.timeout(get_snow_time())
+        fill.interrupt()
+
+
+
+
+
 if __name__ == "__main__":
     env = simpy.Environment()
 
     runways = simpy.PriorityResource(env, capacity=NUM_RUNWAYS)
     deicing_trucks = simpy.PriorityResource(env, capacity=NUM_DEICING_TRUCKS)
     plane_gen = PlaneGenerator(env, runways, deicing_trucks)
-    plow_gen = PlowTruckGenerator(env, runways)
+    plow_gen = Weather(env, runways)#PlowTruckGenerator(env, runways)
 
     env.run(until=SIM_TIME)
 
@@ -232,7 +271,7 @@ if __name__ == "__main__":
     plt.plot([i for i in range(len(deicing_means))], deicing_means, "b--")
     plt.legend(['Landing', 'take-off', "deicing"])
     plt.xlabel('Hour of day')
-    plt.ylabel('Qeueu time (seconds)')
-    plt.title('Mean landing and take-off times', fontsize=16)
+    plt.ylabel('Queue time (seconds)')
+    plt.title('Mean landing, take-off and deicing queue times', fontsize=16)
 
     plt.show()
